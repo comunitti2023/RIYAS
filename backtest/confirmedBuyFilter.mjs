@@ -4,11 +4,19 @@
  */
 export function confirmedBuyFilter({bars, index, pivot, maxCrossoverAge = 3, volumeMultiplier = 1}) {
   const reasons = [];
-  if (!Array.isArray(bars) || index < 35 || index >= bars.length || !pivot || !Number.isFinite(pivot.poc) || !Number.isFinite(pivot.buy)) {
+  if (!Array.isArray(bars) || !Number.isInteger(index) || index < 35 || index >= bars.length || !pivot || !Number.isFinite(pivot.poc) || !Number.isFinite(pivot.buy)) {
     return {signal:'WAIT',buy:false,reasons:['INSUFFICIENT_HISTORY_OR_PIVOT']};
   }
-  const closes=bars.slice(0,index+1).map(b=>Number(b.close));
-  const ema = period => {const k=2/(period+1);let v=closes.slice(0,period).reduce((a,b)=>a+b,0)/period;let arr=Array(closes.length).fill(null);arr[period-1]=v;for(let i=period;i<closes.length;i++)arr[i]=v=k*closes[i]+(1-k)*v;return arr};
+  const observed = bars.slice(0, index + 1);
+  if (observed.some(b => !b || !Number.isFinite(b.close) || b.close <= 0 ||
+      !Number.isFinite(b.volume) || b.volume < 0 || b.complete === false || b.isComplete === false)) {
+    return {signal:'WAIT',buy:false,reasons:['INVALID_OR_INCOMPLETE_CANDLE']};
+  }
+  if (pivot.sourceEndDate && bars[index].date && String(pivot.sourceEndDate).slice(0,10) >= String(bars[index].date).slice(0,10)) {
+    return {signal:'WAIT',buy:false,reasons:['PIVOT_REFERENCE_NOT_HISTORICAL']};
+  }
+  const closes=observed.map(b=>b.close);
+  const ema = period => {const k=2/(period+1);let v=closes[0];let arr=Array(closes.length).fill(null);arr[0]=v;for(let i=1;i<closes.length;i++)arr[i]=v=k*closes[i]+(1-k)*v;return arr};
   const ema9=ema(9),ema21=ema(21);
   const rsi=Array(closes.length).fill(null);let gain=0,loss=0;
   for(let i=1;i<=14;i++){let d=closes[i]-closes[i-1];gain+=Math.max(0,d);loss+=Math.max(0,-d)}
@@ -31,4 +39,13 @@ export function confirmedBuyFilter({bars, index, pivot, maxCrossoverAge = 3, vol
   if(lastCross<0)reasons.push('NO_RECENT_RSI_CROSSOVER');
   const buy=reasons.length===0;
   return {buy,signal:buy?'BUY':(close<pivot.poc||ema9[index]<ema21[index]?'AVOID':'WAIT'),reasons,observedDate:current.date??null,earliestEntryIndex:index+1,metrics:{rsi14:rsi[index],rsiSma14:sma14(index),ema9:ema9[index],ema21:ema21[index],poc:pivot.poc,buyLevel:pivot.buy,averageVolume20:avgVol}};
+}
+
+/** Preserve the existing application's 2/8 pivot calculation exactly. */
+export function pivotFromAppLevels(levels, sourceEndDate = null) {
+  if (!levels || typeof levels !== 'object') return null;
+  const poc = levels.ppRaw ?? levels.poc;
+  const buy = levels.buyPrice ?? levels.buy;
+  if (!Number.isFinite(poc) || !Number.isFinite(buy) || poc <= 0 || buy <= 0) return null;
+  return {poc, buy, sourceEndDate};
 }
