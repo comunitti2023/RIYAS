@@ -24,3 +24,19 @@ test('bullish confirmation can trigger BUY',()=>{
  const result=bars.map((_,index)=>index>=35?confirmedBuyFilter({bars,index,pivot}):null).find(x=>x?.buy);
  assert.ok(result);assert.equal(result.signal,'BUY');assert.ok(result.metrics.rsi14>50);assert.ok(result.metrics.ema9>result.metrics.ema21);
 });
+
+test('reject incomplete signal candles and invalid prices',()=>{
+ const incomplete=bars.map((b,i)=>i===60?{...b,complete:false}:b);
+ assert.deepEqual(confirmedBuyFilter({bars:incomplete,index:60,pivot}).reasons,['INVALID_OR_INCOMPLETE_CANDLE']);
+ const corrupted=bars.map((b,i)=>i===60?{...b,close:NaN}:b);
+ assert.deepEqual(confirmedBuyFilter({bars:corrupted,index:60,pivot}).reasons,['INVALID_OR_INCOMPLETE_CANDLE']);
+});
+test('reject historical pivot derived from a future candle',()=>{
+ const result=confirmedBuyFilter({bars,index:60,pivot:{...pivot,sourceEndDate:'2026-12-31'}});
+ assert.equal(result.buy,false);
+ assert.deepEqual(result.reasons,['PIVOT_REFERENCE_NOT_HISTORICAL']);
+});
+test('pivot field mapping uses existing app raw PP and computed buy',async()=>{
+ const {pivotFromAppLevels}=await import('./confirmedBuyFilter.mjs');
+ assert.deepEqual(pivotFromAppLevels({ppRaw:123.45,pp:122,buyPrice:128},'2025-12-31'),{poc:123.45,buy:128,sourceEndDate:'2025-12-31'});
+});
